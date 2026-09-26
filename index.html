@@ -93,7 +93,7 @@ const CHARS = [
   { name: 'Bébé Cool',    img: 'baby.jpg', crop: [22, 18, 360], color: '#ff9e40', speed: 1.30, power: 0.80, def: 0.85, size: 0.5,
     look: { skin: '#f3cbb7', hair: '#8a5a3a', hairStyle: 'tuft', shirt: '#f1ead8', top: 'stripesH', stripe: '#2e4a78',
             pants: '#1c2340', shoes: '#1c2340', w: 1.3, h: 0.8, head: 1.4, win: 'raise', photoColor: true },
-    sup: { type: 'cry', name: 'CRI DE BÉBÉ' } },
+    sup: { type: 'beam', name: 'KAMÉHAMÉHA' } },
 ];
 // Photos séparées (un personnage peut avoir sa propre photo, sinon photo.jpg)
 CHARS.forEach(c => { c.pic = photo; if (c.img) { c.pic = new Image(); c.pic.src = c.img; } });
@@ -230,7 +230,8 @@ function sfx(k) {
   else if (k === 'super') { tone('sawtooth', 200, 1200, 0.45, 0.15); tone('square', 400, 1600, 0.45, 0.06); }
   else if (k === 'fart') { tone('sawtooth', 95, 55, 0.45, 0.35); tone('square', 70, 45, 0.4, 0.15); noise(0.35, 0.4, 350); }
   else if (k === 'throw') { noise(0.15, 0.3, 1800); tone('triangle', 500, 900, 0.12, 0.1); }
-  else if (k === 'cry') { tone('sawtooth', 620, 880, 0.35, 0.12); setTimeout(() => AC && tone('sawtooth', 880, 560, 0.6, 0.12), 330); }
+  else if (k === 'charge') { tone('sine', 180, 700, 0.5, 0.2); tone('triangle', 360, 1400, 0.5, 0.06); }
+  else if (k === 'beam') { noise(0.8, 0.5, 2500); tone('sawtooth', 140, 90, 0.8, 0.25); tone('square', 900, 600, 0.7, 0.05); }
   else if (k === 'ui') { tone('triangle', 660, 880, 0.07, 0.12); }
   else if (k === 'go') { tone('square', 440, 440, 0.12, 0.1); setTimeout(() => AC && tone('square', 880, 880, 0.25, 0.1), 130); }
 }
@@ -400,7 +401,7 @@ class Fighter {
     game.superFx = { f: this, t: 0 };
     sfx('super');
     if (this.c.sup.type === 'fart') { this.boost = 60 * 8; fart(this); }
-    else { this.state = 'super'; this.t = 0; this.vx = 0; }
+    else { this.state = 'super'; this.t = 0; this.vx = 0; if (this.c.sup.type === 'beam') spawnSuper(this); }
   }
   update(inp, opp) {
     this.anim++;
@@ -421,8 +422,9 @@ class Fighter {
         if (--this.stun <= 0 && this.grounded) this.state = 'idle';
       } else if (st === 'super') {
         this.t++; this.vx = 0;
-        if (this.t === 12) spawnSuper(this);
-        if (this.t >= 30) this.state = 'idle';
+        const beam = this.c.sup.type === 'beam';
+        if (!beam && this.t === 12) spawnSuper(this);
+        if (this.t >= (beam ? 72 : 30)) this.state = 'idle';
       } else if (st === 'attack') {
         const a = this.atk; this.t++;
         if (inp.attack && this.t > a.start) this.queued = true;
@@ -519,11 +521,11 @@ function fart(f) {
 function spawnSuper(f) {
   const t = f.c.sup.type, d = f.face, base = { owner: f, t: 0, hit: false, rot: 0 };
   const opp = f === game.p1 ? game.p2 : game.p1, hs = Math.min(f.size, opp.size);
-  sfx(t === 'cry' ? 'cry' : 'throw');
+  sfx(t === 'beam' ? 'charge' : 'throw');
   if (t === 'screw') game.projs.push({ ...base, type: t, x: f.x + d * 40, y: f.y - 125 * hs, vx: d * 11, vy: 0, life: 120, w: 64, h: 32, dmg: 18, kb: 10, stun: 26 });
   else if (t === 'glasses') game.projs.push({ ...base, type: t, x: f.x + d * 40, y: f.y - 135 * hs, vx: d * 10, ax: -d * 0.2, vy: 0, life: 170, w: 64, h: 32, dmg: 12, kb: 7, stun: 20, dir0: d });
   else if (t === 'mini') game.projs.push({ ...base, type: t, x: f.x + d * 35, y: GROUND, vx: d * 6.5, vy: 0, life: 150, w: 36, h: 80, dmg: 20, kb: 12, stun: 30, launch: true, face: d });
-  else if (t === 'cry') game.projs.push({ ...base, type: t, x: f.x + d * 30, y: f.y - 70, vx: d * 8, vy: 0, life: 90, w: 60, h: 130, dmg: 14, kb: 6, stun: 50, face: d });
+  else if (t === 'beam') game.projs.push({ ...base, type: t, x: f.x, y: f.y, vx: 0, vy: 0, life: 72, face: d, len: 0, hits: 0, tick: 0 });
   else if (t === 'hand') game.projs.push({ ...base, type: t, x: f.x + d * 55, y: f.y - 110 * Math.max(hs, 0.8), vx: d * 7, vy: 0, life: 38, w: 110, h: 150, dmg: 24, kb: 16, stun: 32, launch: true, face: d });
 }
 function stepProjs() {
@@ -539,6 +541,23 @@ function stepProjs() {
         d.hp = Math.max(0, d.hp - dmg); d.dmgDelay = 30; d.flash = 4;
         popups.push({ txt: 'beurk !', x: d.x, y: d.y - 205 * d.size, life: 30, color: '#9be15d' });
         if (d.hp <= 0) { d.state = 'ko'; d.vy = -9; d.vx = o.face * 5; sfx('ko'); game.hitstop = 14; }
+      }
+      continue;
+    }
+    if (p.type === 'beam') {
+      // Kaméhaméha : charge 30 images, puis rayon qui touche jusqu'à 5 fois
+      if (o.state !== 'super') { p.life = 0; continue; } // interrompu par un coup
+      p.face = o.face; p.x = o.x + o.face * 62 * o.size; p.y = o.y - 110 * o.size;
+      if (p.t === 30) { sfx('beam'); game.shake = 8; }
+      if (p.t > 30) {
+        p.len = Math.min(W + 100, (p.t - 30) * 45);
+        const lo = Math.min(p.x, p.x + p.face * p.len), hi = Math.max(p.x, p.x + p.face * p.len), th = 34;
+        if (++p.tick % 7 === 0 && p.hits < 5 && d.state !== 'ko' && d.x + 26 > lo && d.x - 26 < hi && p.y + th > d.y - 190 * d.size && p.y - th < d.y) {
+          p.hits++;
+          const last = p.hits === 5;
+          applyHit(o, d, { dmg: 6, kb: last ? 14 : 3, stun: last ? 30 : 16, launch: last, dir: p.face, hx: d.x - p.face * 15, hy: Math.max(d.y - 180 * d.size, Math.min(d.y - 20, p.y)), sup: true });
+          game.hitstop = last ? 8 : 2; game.shake = 6;
+        }
       }
       continue;
     }
@@ -590,17 +609,33 @@ function drawProj(p) {
     const s = 0.45;
     ctx.translate(p.x, p.y); ctx.scale(s, s); ctx.translate(-p.x, -GROUND);
     drawFighter({ c: p.owner.c, ci: p.owner.ci, x: p.x, y: GROUND, face: p.face, state: 'walk', anim: p.t * 2, flash: 0, grounded: true });
-  } else if (p.type === 'cry') {
-    // Ondes sonores + "OUIN !"
-    ctx.translate(p.x, p.y); ctx.scale(p.face, 1);
-    ctx.shadowColor = '#ff9e40'; ctx.shadowBlur = 16; ctx.lineCap = 'round';
-    for (let i = 0; i < 3; i++) {
-      const r = 18 + i * 16 + (p.t % 10) * 1.5;
-      ctx.globalAlpha = 0.9 - i * 0.25; ctx.strokeStyle = i % 2 ? '#fff' : '#ffb366'; ctx.lineWidth = 5;
-      ctx.beginPath(); ctx.arc(-20, 0, r, -0.9, 0.9); ctx.stroke();
+  } else if (p.type === 'beam') {
+    const glow = (x, y, r, a) => {
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, `rgba(255,255,255,${a})`); g.addColorStop(0.35, `rgba(120,220,255,${a * 0.9})`); g.addColorStop(1, 'rgba(40,120,255,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    };
+    ctx.save(); ctx.translate(p.x, p.y); ctx.scale(p.face, 1);
+    ctx.globalCompositeOperation = 'lighter';
+    let label;
+    if (p.t <= 30) {
+      // Boule d'énergie qui grossit entre les mains, en arrière
+      const k = p.t / 30, fl = 1 + Math.sin(p.t * 1.3) * 0.12;
+      glow(-40, 24, (10 + 22 * k) * fl, 0.9);
+      if (p.t % 3 === 0) burst(p.x - p.face * 40, p.y + 24, '#8fe3ff', 2, 3);
+      label = ['KA…', 'MÉ…', 'HA…', 'MÉ…'][Math.min(3, Math.floor(p.t / 7.5))];
+    } else {
+      const L = p.len, th = 22 + Math.sin(p.t * 0.9) * 3, fade = Math.min(1, p.life / 8);
+      ctx.globalAlpha = fade;
+      const g = ctx.createLinearGradient(0, -th * 1.8, 0, th * 1.8);
+      g.addColorStop(0, 'rgba(40,120,255,0)'); g.addColorStop(0.3, 'rgba(90,190,255,0.8)');
+      g.addColorStop(0.5, 'rgba(255,255,255,1)'); g.addColorStop(0.7, 'rgba(90,190,255,0.8)'); g.addColorStop(1, 'rgba(40,120,255,0)');
+      ctx.fillStyle = g; ctx.fillRect(0, -th * 1.8, L, th * 3.6);
+      glow(0, 0, th * 2, 1); glow(L, 0, th * 1.8, 1);
+      label = 'HAAAA !';
     }
-    ctx.globalAlpha = 1; ctx.scale(p.face, 1);
-    text('OUIN !', 0, -48, 20, '#ffb366', 'center');
+    ctx.restore();
+    text(label, p.x, p.y - 70, p.t <= 30 ? 20 : 28, '#8fe3ff', 'center');
   } else if (p.type === 'hand') {
     const sc = Math.min(1, p.t / 10) * 1.6, skin = p.owner.c.look.skin;
     ctx.globalAlpha = Math.min(1, p.life / 8);
@@ -653,7 +688,7 @@ class AI {
     if (me.state === 'attack' && Math.random() < d.aggr * 0.12) inp.attack = true; // enchaîner
     if (me.canSuper() && Math.random() < 0.02 + d.aggr * 0.03) {
       const t = me.c.sup.type;
-      if ((t === 'hand' && dist < 190) || (t !== 'hand' && t !== 'fart' && dist > 60) || t === 'fart') inp.super = true;
+      if ((t === 'hand' && dist < 190) || (t !== 'hand' && t !== 'fart' && dist > 60) || t === 'beam' || t === 'fart') inp.super = true;
     }
     if (me.boost > 0 && me.state === 'jump' && me.vy > -3 && !me.airJumps && Math.random() < 0.15) inp.up = true;
     if (this.move > 0) inp.right = true; else if (this.move < 0) inp.left = true;
@@ -681,6 +716,8 @@ const POSES = {
   rock:   [0.3, 2.5, 2.05, 2.2, -0.25, -0.25, 0.3, 0.2],
   point:  [-0.6, 0.7, 1.55, 1.45, -0.2, -0.2, 0.25, 0.15],
   throw:  [-0.7, -0.3, 1.9, 1.7, -0.35, -0.3, 0.55, 0.1],
+  kameC:  [-0.8, 0.9, -0.6, 1.1, -0.45, -0.45, 0.6, 0.1],
+  kameF:  [1.5, 1.55, 1.65, 1.6, -0.45, -0.45, 0.6, 0.1],
 };
 
 function getPose(f) {
@@ -696,7 +733,8 @@ function getPose(f) {
     else { p = lerpPose(POSES.idle, POSES[a.id], k); lean = 0.12 * k; }
   } else if (s === 'super') {
     const k = Math.min(1, f.t / 12);
-    p = lerpPose(POSES.idle, f.c.sup.type === 'hand' ? POSES.jab : POSES.throw, k); lean = 0.15 * k;
+    if (f.c.sup.type === 'beam') { const fire = f.t > 30; p = fire ? POSES.kameF : lerpPose(POSES.idle, POSES.kameC, k); lean = fire ? 0.12 : -0.12; }
+    else { p = lerpPose(POSES.idle, f.c.sup.type === 'hand' ? POSES.jab : POSES.throw, k); lean = 0.15 * k; }
   } else if (s === 'walk') {
     const w = Math.sin(f.anim * 0.22);
     p = POSES.idle.slice();
