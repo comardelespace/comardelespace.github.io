@@ -90,7 +90,14 @@ const CHARS = [
     look: { skin: '#e6b596', hair: '#e2e2e2', hairStyle: 'short', shirt: '#f7f7f7', top: 'polo', badge: true,
             pants: '#a99f8a', shoes: '#5b4231', w: 1.18, h: 0.98, win: 'point' },
     sup: { type: 'screw', name: 'TOURNEVIS' } },
+  { name: 'Bébé Cool',    img: 'baby.jpg', crop: [22, 18, 360], color: '#ff9e40', speed: 1.30, power: 0.80, def: 0.85, size: 0.5,
+    look: { skin: '#f3cbb7', hair: '#8a5a3a', hairStyle: 'tuft', shirt: '#f1ead8', top: 'stripesH', stripe: '#2e4a78',
+            pants: '#1c2340', shoes: '#1c2340', w: 1.3, h: 0.8, head: 1.4, win: 'raise', photoColor: true },
+    sup: { type: 'cry', name: 'CRI DE BÉBÉ' } },
 ];
+// Photos séparées (un personnage peut avoir sa propre photo, sinon photo.jpg)
+CHARS.forEach(c => { c.pic = photo; if (c.img) { c.pic = new Image(); c.pic.src = c.img; } });
+const picReady = c => c.pic.complete && c.pic.naturalWidth;
 
 const DIFFS = [
   { name: 'FACILE',    react: 24, aggr: 0.35, block: 0.20, jump: 0.04 },
@@ -223,6 +230,7 @@ function sfx(k) {
   else if (k === 'super') { tone('sawtooth', 200, 1200, 0.45, 0.15); tone('square', 400, 1600, 0.45, 0.06); }
   else if (k === 'fart') { tone('sawtooth', 95, 55, 0.45, 0.35); tone('square', 70, 45, 0.4, 0.15); noise(0.35, 0.4, 350); }
   else if (k === 'throw') { noise(0.15, 0.3, 1800); tone('triangle', 500, 900, 0.12, 0.1); }
+  else if (k === 'cry') { tone('sawtooth', 620, 880, 0.35, 0.12); setTimeout(() => AC && tone('sawtooth', 880, 560, 0.6, 0.12), 330); }
   else if (k === 'ui') { tone('triangle', 660, 880, 0.07, 0.12); }
   else if (k === 'go') { tone('square', 440, 440, 0.12, 0.1); setTimeout(() => AC && tone('square', 880, 880, 0.25, 0.1), 130); }
 }
@@ -365,7 +373,7 @@ function drawParticles() {
 let atkCounter = 0;
 class Fighter {
   constructor(ci, x, face, cpu) {
-    this.ci = ci; this.c = CHARS[ci]; this.cpu = cpu;
+    this.ci = ci; this.c = CHARS[ci]; this.cpu = cpu; this.size = this.c.size || 1;
     this.reset(x, face);
   }
   reset(x, face) {
@@ -397,6 +405,8 @@ class Fighter {
   update(inp, opp) {
     this.anim++;
     const upEdge = inp.up && !this.prevUp; this.prevUp = inp.up;
+    // Un appui sur super pendant un coup est gardé en mémoire un court instant
+    if (inp.super) this.superBuf = 20; else if (this.superBuf > 0) this.superBuf--;
     if (this.boost > 0) this.boost--;
     if (this.grounded) this.airJumps = 0;
     if (this.flash > 0) this.flash--;
@@ -428,7 +438,7 @@ class Fighter {
         this.bstun--; this.state = 'block';
       } else {
         const spd = 4.2 * this.c.speed;
-        if (inp.super && this.canSuper()) this.startSuper();
+        if (this.superBuf > 0 && this.canSuper()) { this.superBuf = 0; this.startSuper(); }
         else if (!this.grounded && upEdge && this.boost > 0 && this.airJumps < 1) { this.airJumps++; fart(this); }
         else if (inp.block && this.grounded) { this.state = 'block'; this.vx *= 0.5; }
         else if (inp.attack) { this.startAttack(this.grounded ? 0 : 3); }
@@ -455,13 +465,15 @@ class Fighter {
 
 function tryHit(a, d) {
   const at = a.atk;
-  const x1 = a.x + a.face * 10, x2 = a.x + a.face * at.range;
+  // Un petit perso frappe plus court et plus bas ; un grand vise plus bas contre un petit
+  const ys = a.size < 1 ? a.size : d.size < 1 ? 0.55 : 1;
+  const x1 = a.x + a.face * 10, x2 = a.x + a.face * (at.range * a.size + (a.size < 1 ? 14 : 0));
   const lo = Math.min(x1, x2), hi = Math.max(x1, x2);
-  const top = a.y + at.y1, bot = a.y + at.y2;
-  if (hi < d.x - 28 || lo > d.x + 28 || bot < d.y - 195 || top > d.y) return;
+  const top = a.y + at.y1 * ys, bot = a.y + at.y2 * ys;
+  if (hi < d.x - 28 || lo > d.x + 28 || bot < d.y - 195 * d.size || top > d.y) return;
   if (d.state === 'ko') return;
   a.hasHit = true;
-  const hx = d.x - a.face * 18, hy = (Math.max(top, d.y - 190) + Math.min(bot, d.y)) / 2;
+  const hx = d.x - a.face * 18, hy = (Math.max(top, d.y - 190 * d.size) + Math.min(bot, d.y)) / 2;
   applyHit(a, d, { dmg: at.dmg, kb: at.kb, stun: at.stun, launch: at.launch, dir: a.face, hx, hy });
 }
 
@@ -489,7 +501,7 @@ function applyHit(a, d, o) {
   if (!o.sup) a.meter = Math.min(100, a.meter + (blocking ? 3 : o.dmg * 1.6));
   d.meter = Math.min(100, d.meter + dmg * 0.8);
   d.hp = Math.max(0, d.hp - dmg); d.dmgDelay = 30;
-  popups.push({ txt: '-' + Math.round(dmg), x: d.x, y: d.y - 205, life: 40, color: blocking ? '#9cf' : '#ffdf6b' });
+  popups.push({ txt: '-' + Math.round(dmg), x: d.x, y: d.y - 205 * d.size, life: 40, color: blocking ? '#9cf' : '#ffdf6b' });
   if (d.hp <= 0) {
     d.state = 'ko'; d.vy = -9; d.vx = dir * 7; d.t = 0;
     sfx('ko'); game.shake = 18; game.hitstop = 14;
@@ -506,11 +518,13 @@ function fart(f) {
 }
 function spawnSuper(f) {
   const t = f.c.sup.type, d = f.face, base = { owner: f, t: 0, hit: false, rot: 0 };
-  sfx('throw');
-  if (t === 'screw') game.projs.push({ ...base, type: t, x: f.x + d * 40, y: f.y - 125, vx: d * 11, vy: 0, life: 120, w: 64, h: 32, dmg: 18, kb: 10, stun: 26 });
-  else if (t === 'glasses') game.projs.push({ ...base, type: t, x: f.x + d * 40, y: f.y - 135, vx: d * 10, ax: -d * 0.2, vy: 0, life: 170, w: 64, h: 32, dmg: 12, kb: 7, stun: 20, dir0: d });
+  const opp = f === game.p1 ? game.p2 : game.p1, hs = Math.min(f.size, opp.size);
+  sfx(t === 'cry' ? 'cry' : 'throw');
+  if (t === 'screw') game.projs.push({ ...base, type: t, x: f.x + d * 40, y: f.y - 125 * hs, vx: d * 11, vy: 0, life: 120, w: 64, h: 32, dmg: 18, kb: 10, stun: 26 });
+  else if (t === 'glasses') game.projs.push({ ...base, type: t, x: f.x + d * 40, y: f.y - 135 * hs, vx: d * 10, ax: -d * 0.2, vy: 0, life: 170, w: 64, h: 32, dmg: 12, kb: 7, stun: 20, dir0: d });
   else if (t === 'mini') game.projs.push({ ...base, type: t, x: f.x + d * 35, y: GROUND, vx: d * 6.5, vy: 0, life: 150, w: 36, h: 80, dmg: 20, kb: 12, stun: 30, launch: true, face: d });
-  else if (t === 'hand') game.projs.push({ ...base, type: t, x: f.x + d * 55, y: f.y - 110, vx: d * 7, vy: 0, life: 38, w: 110, h: 150, dmg: 24, kb: 16, stun: 32, launch: true, face: d });
+  else if (t === 'cry') game.projs.push({ ...base, type: t, x: f.x + d * 30, y: f.y - 70, vx: d * 8, vy: 0, life: 90, w: 60, h: 130, dmg: 14, kb: 6, stun: 50, face: d });
+  else if (t === 'hand') game.projs.push({ ...base, type: t, x: f.x + d * 55, y: f.y - 110 * Math.max(hs, 0.8), vx: d * 7, vy: 0, life: 38, w: 110, h: 150, dmg: 24, kb: 16, stun: 32, launch: true, face: d });
 }
 function stepProjs() {
   const g = game;
@@ -520,10 +534,10 @@ function stepProjs() {
     if (p.type === 'gas') {
       // Nuage toxique : petits dégâts à l'adversaire qui reste dedans
       const r = 30 + Math.min(1, p.t / 20) * 28;
-      if (++p.tick % 15 === 0 && d.state !== 'ko' && Math.abs(d.x - p.x) < r + 22 && d.y - 190 < p.y + r && d.y > p.y - r) {
+      if (++p.tick % 15 === 0 && d.state !== 'ko' && Math.abs(d.x - p.x) < r + 22 && d.y - 190 * d.size < p.y + r && d.y > p.y - r) {
         const dmg = 1.5 / d.c.def;
         d.hp = Math.max(0, d.hp - dmg); d.dmgDelay = 30; d.flash = 4;
-        popups.push({ txt: 'beurk !', x: d.x, y: d.y - 205, life: 30, color: '#9be15d' });
+        popups.push({ txt: 'beurk !', x: d.x, y: d.y - 205 * d.size, life: 30, color: '#9be15d' });
         if (d.hp <= 0) { d.state = 'ko'; d.vy = -9; d.vx = o.face * 5; sfx('ko'); game.hitstop = 14; }
       }
       continue;
@@ -538,7 +552,7 @@ function stepProjs() {
     if (p.x < -60 || p.x > W + 60) p.life = 0;
     const sc = p.type === 'hand' ? Math.min(1, p.t / 10) : 1, hw = p.w * sc / 2, hh = p.h * sc / 2;
     const cy = p.type === 'mini' ? p.y - 40 : p.y;
-    if (!p.hit && d.state !== 'ko' && Math.abs(p.x - d.x) < hw + 26 && cy + hh > d.y - 190 && cy - hh < d.y) {
+    if (!p.hit && d.state !== 'ko' && Math.abs(p.x - d.x) < hw + 26 && cy + hh > d.y - 190 * d.size && cy - hh < d.y) {
       p.hit = true;
       applyHit(o, d, { dmg: p.dmg, kb: p.kb, stun: p.stun, launch: p.launch, dir: Math.sign(p.vx) || o.face, hx: d.x - Math.sign(p.vx) * 15, hy: Math.max(d.y - 180, Math.min(d.y - 30, cy)), sup: true });
       if (p.type === 'screw' || p.type === 'mini') p.life = 0;
@@ -576,6 +590,17 @@ function drawProj(p) {
     const s = 0.45;
     ctx.translate(p.x, p.y); ctx.scale(s, s); ctx.translate(-p.x, -GROUND);
     drawFighter({ c: p.owner.c, ci: p.owner.ci, x: p.x, y: GROUND, face: p.face, state: 'walk', anim: p.t * 2, flash: 0, grounded: true });
+  } else if (p.type === 'cry') {
+    // Ondes sonores + "OUIN !"
+    ctx.translate(p.x, p.y); ctx.scale(p.face, 1);
+    ctx.shadowColor = '#ff9e40'; ctx.shadowBlur = 16; ctx.lineCap = 'round';
+    for (let i = 0; i < 3; i++) {
+      const r = 18 + i * 16 + (p.t % 10) * 1.5;
+      ctx.globalAlpha = 0.9 - i * 0.25; ctx.strokeStyle = i % 2 ? '#fff' : '#ffb366'; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.arc(-20, 0, r, -0.9, 0.9); ctx.stroke();
+    }
+    ctx.globalAlpha = 1; ctx.scale(p.face, 1);
+    text('OUIN !', 0, -48, 20, '#ffb366', 'center');
   } else if (p.type === 'hand') {
     const sc = Math.min(1, p.t / 10) * 1.6, skin = p.owner.c.look.skin;
     ctx.globalAlpha = Math.min(1, p.life / 8);
@@ -628,7 +653,7 @@ class AI {
     if (me.state === 'attack' && Math.random() < d.aggr * 0.12) inp.attack = true; // enchaîner
     if (me.canSuper() && Math.random() < 0.02 + d.aggr * 0.03) {
       const t = me.c.sup.type;
-      if ((t === 'hand' && dist < 190) || (t !== 'hand' && t !== 'fart' && dist > 90) || t === 'fart') inp.super = true;
+      if ((t === 'hand' && dist < 190) || (t !== 'hand' && t !== 'fart' && dist > 60) || t === 'fart') inp.super = true;
     }
     if (me.boost > 0 && me.state === 'jump' && me.vy > -3 && !me.airJumps && Math.random() < 0.15) inp.up = true;
     if (this.move > 0) inp.right = true; else if (this.move < 0) inp.left = true;
@@ -712,6 +737,10 @@ function drawArm(x, y, a1, a2, L, back) {
   const sx = x + (ex - x) * k, sy = y + (ey - y) * k;
   stroke([x, y, sx, sy], L.top === 'oversize' ? 21 : 18, shade(L.shirt, d));
   if (L.top === 'stripes') { ctx.lineWidth = 2; ctx.strokeStyle = shade(L.stripe, d); ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(sx, sy); ctx.stroke(); }
+  if (L.top === 'stripesH') {
+    ctx.fillStyle = shade(L.stripe, d);
+    for (const k2 of [0.35, 0.7]) { ctx.beginPath(); ctx.arc(x + (sx - x) * k2, y + (sy - y) * k2, 4, 0, Math.PI * 2); ctx.fill(); }
+  }
   ctx.fillStyle = shade(L.skin, d);
   ctx.beginPath(); ctx.arc(hx, hy, 8, 0, Math.PI * 2); ctx.fill();
 }
@@ -742,6 +771,16 @@ function drawTorso(sh, L, bw) {
   ctx.fillStyle = g; ctx.fill();
   ctx.save(); ctx.clip();
   ctx.shadowBlur = 0;
+  if (L.top === 'stripesH') {
+    ctx.strokeStyle = L.stripe; ctx.lineWidth = 2.2;
+    for (let y = top + 5; y < bottom; y += 7) {
+      ctx.beginPath(); ctx.moveTo(-tw, y);
+      for (let x = -tw; x <= tw + 6; x += 6) ctx.lineTo(x, y + Math.sin(x * 0.35 + y) * 1.4);
+      ctx.stroke();
+    }
+    ctx.fillStyle = L.stripe; ctx.font = '900 7px system-ui,sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('SUN IS', 8, top + 22); ctx.fillText('COOL', 8, top + 29);
+  }
   if (L.top === 'stripes') {
     ctx.strokeStyle = L.stripe; ctx.lineWidth = 1.6;
     for (let x = -tw; x < tw + 6; x += 5) { ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x + 1, bottom); ctx.stroke(); }
@@ -796,6 +835,13 @@ function drawHair(L, x, y, r) {
     for (let a = 0.6; a < 3.4; a += 0.4) blob(a, r * 0.95, r * 0.3);
   } else if (st === 'fluffy') {
     for (let a = 0.15; a < 3.5; a += 0.28) blob(a, r * 0.98, r * 0.33);
+  } else if (st === 'tuft') {
+    for (let a = 0.5; a < 2.7; a += 0.35) blob(a, r * 0.92, r * 0.2);
+    ctx.strokeStyle = L.hair; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    for (const [a, l] of [[1.35, 1.35], [1.55, 1.45], [1.75, 1.3]]) {
+      ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * r * 0.8, y - Math.sin(a) * r * 0.8);
+      ctx.quadraticCurveTo(x + Math.cos(a) * r * 1.2 + 4, y - Math.sin(a) * r * 1.2, x + Math.cos(a - 0.1) * r * l, y - Math.sin(a - 0.1) * r * l); ctx.stroke();
+    }
   } else if (st === 'messy') {
     for (let a = 0.2; a < 3.3; a += 0.3) blob(a, r * 0.95, r * 0.3);
     for (let a = 0.5; a < 2.8; a += 0.45) {
@@ -818,12 +864,14 @@ function drawFace(ci, x, y, r, ring, oval) {
   ctx.closePath();
   ctx.fillStyle = c.look.skin; ctx.fill();
   ctx.save(); ctx.shadowBlur = 0; ctx.clip();
-  if (photo.complete && photo.naturalWidth) {
+  if (picReady(c)) {
     const [cx, cy, cs] = c.crop;
-    ctx.drawImage(photo, cx, cy, cs, cs, x - r, y - r, r * 2, r * 2);
+    ctx.drawImage(c.pic, cx, cy, cs, cs, x - r, y - r, r * 2, r * 2);
     // Légère colorisation de la photo noir & blanc (garde la luminosité)
-    ctx.globalCompositeOperation = 'color'; ctx.globalAlpha = 0.45;
-    ctx.fillStyle = c.look.skin; ctx.fillRect(x - r, y - r, r * 2, r * 2);
+    if (!c.look.photoColor) {
+      ctx.globalCompositeOperation = 'color'; ctx.globalAlpha = 0.45;
+      ctx.fillStyle = c.look.skin; ctx.fillRect(x - r, y - r, r * 2, r * 2);
+    }
   }
   ctx.restore();
   if (ring) { ctx.lineWidth = ring; ctx.strokeStyle = c.color; ctx.stroke(); }
@@ -836,11 +884,12 @@ function drawFighter(f) {
   // Ombre au sol
   const air = Math.min(1, (GROUND - f.y) / 220);
   ctx.fillStyle = `rgba(0,0,0,${0.5 - air * 0.3})`;
-  ctx.beginPath(); ctx.ellipse(f.x, GROUND + 2, 42 * bw * (1 - air * 0.5), 9 * (1 - air * 0.5), 0, 0, Math.PI * 2); ctx.fill();
+  const sz = f.c.size || 1;
+  ctx.beginPath(); ctx.ellipse(f.x, GROUND + 2, 42 * bw * sz * (1 - air * 0.5), 9 * (1 - air * 0.5), 0, 0, Math.PI * 2); ctx.fill();
 
   ctx.save();
   ctx.translate(f.x, f.y);
-  ctx.scale(f.face, 1);
+  ctx.scale(f.face * sz, sz);
   if (f.state === 'ko' && f.grounded) {
     ctx.translate(0, -14); ctx.rotate(-Math.PI / 2 * Math.min(1, 0.6 + f.anim * 0.02));
   }
@@ -851,7 +900,7 @@ function drawFighter(f) {
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   ctx.shadowColor = col; ctx.shadowBlur = 10;
   const sh = [4, -58 * L.h + bob * 0.2];
-  const HR = 36, hx = sh[0] + 3, hy = sh[1] - HR - 4;
+  const HR = 36 * (L.head || 1), hx = sh[0] + 3, hy = sh[1] - HR - 4;
   // Arrière-plan du corps
   drawArm(sh[0] - 4, sh[1] + 5, p[0], p[1], L, true);
   drawLeg(-4 * bw, 0, p[4], p[5], lh, L, bw, true);
@@ -874,7 +923,7 @@ function drawFighter(f) {
   ctx.restore();
   if (f.flash > 0) {
     ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = f.flash / 10;
-    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.ellipse(f.x, f.y - 95, 45, 100, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.ellipse(f.x, f.y - 95 * sz, 45 * sz, 100 * sz, 0, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   }
 }
@@ -1088,7 +1137,7 @@ function renderTitle() {
   text('FIGHTERS', W / 2, 205, 96, '#ff5a7a', 'center', 10);
   ctx.restore();
   CHARS.forEach((c, i) => {
-    const x = W / 2 + (i - 2) * 110, y = 305 + Math.sin(frameT * 0.05 + i) * 6;
+    const x = W / 2 + (i - (CHARS.length - 1) / 2) * 105, y = 305 + Math.sin(frameT * 0.05 + i) * 6;
     ctx.save(); ctx.shadowColor = c.color; ctx.shadowBlur = 20; drawFace(i, x, y, 42, 3); ctx.restore();
   });
   const L = TOUCH
@@ -1103,8 +1152,8 @@ function renderTitle() {
 }
 
 // --- Sélection
-const CARD = { w: 150, h: 190, gap: 20, y: 110 };
-const cardX = i => (W - (CARD.w * 5 + CARD.gap * 4)) / 2 + i * (CARD.w + CARD.gap);
+const CARD = { w: 134, h: 178, gap: 14, y: 110 };
+const cardX = i => (W - (CARD.w * CHARS.length + CARD.gap * (CHARS.length - 1))) / 2 + i * (CARD.w + CARD.gap);
 
 function selectConfirm() {
   sfx('go');
@@ -1141,9 +1190,9 @@ function renderSelect() {
     ctx.strokeStyle = on ? c.color : 'rgba(150,170,255,0.4)'; ctx.lineWidth = on ? 4 : 2;
     ctx.strokeRect(x, y, CARD.w, CARD.h);
     ctx.shadowBlur = 0;
-    if (photo.complete && photo.naturalWidth) {
+    if (picReady(c)) {
       const [cx, cy, cs] = c.crop;
-      ctx.drawImage(photo, cx, cy, cs, cs, x + 8, y + 8, CARD.w - 16, CARD.w - 16);
+      ctx.drawImage(c.pic, cx, cy, cs, cs, x + 8, y + 8, CARD.w - 16, CARD.w - 16);
     }
     ctx.globalCompositeOperation = 'soft-light'; ctx.fillStyle = c.color; ctx.fillRect(x + 8, y + 8, CARD.w - 16, CARD.w - 16);
     ctx.globalCompositeOperation = 'source-over';
