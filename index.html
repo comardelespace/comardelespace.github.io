@@ -12,10 +12,11 @@
   html,body{margin:0;height:100%;background:#05030f;overflow:hidden;touch-action:none;overscroll-behavior:none;
     position:fixed;inset:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
     user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
-  #wrap{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}
+  #stage{position:fixed;inset:0}
+  #wrap{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}
   canvas{display:block;image-rendering:auto}
   #hint{display:none;color:#9cf;font-size:14px;font-weight:700;text-align:center;padding:0 16px}
-  #touch{position:fixed;left:0;right:0;bottom:0;display:none;justify-content:space-between;align-items:flex-end;
+  #touch{position:absolute;left:0;right:0;bottom:0;display:none;justify-content:space-between;align-items:flex-end;
     padding:10px calc(14px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left));
     pointer-events:none}
   #touch.on{display:flex}
@@ -31,17 +32,16 @@
   .btn.act{background:rgba(255,80,120,.5);width:78px;height:78px;font-size:34px}
   .btn.def{background:rgba(80,160,255,.5)}
   .btn.down{transform:scale(.9);filter:brightness(1.7);opacity:1}
-  /* Téléphone en portrait : le jeu en haut, les boutons en dessous */
-  body.portrait #wrap{bottom:180px;justify-content:flex-end;padding-bottom:8px}
-  body.menu:not(.portrait) #touch{display:none}
-  body.portrait #hint{display:block}
-  body.portrait #touch{height:170px;align-items:center}
-  body.portrait .btn{width:72px;height:72px;opacity:1}
-  body.portrait .btn.act{width:88px;height:88px}
+  body.menu #touch{display:none}
+  /* Téléphone tenu droit : tout le jeu est tourné de 90° pour jouer en paysage,
+     même si la rotation automatique de l'écran est verrouillée */
+  body.rot #stage{inset:auto;top:0;transform-origin:0 0;transform:rotate(90deg)}
+  body.rot #touch{padding:10px calc(14px + env(safe-area-inset-bottom)) 10px calc(14px + env(safe-area-inset-top))}
 </style>
 </head>
 <body>
-<div id="wrap"><canvas id="c" width="960" height="540"></canvas><div id="hint">↻ Tourne ton téléphone pour jouer en grand</div></div>
+<div id="stage">
+<div id="wrap"><canvas id="c" width="960" height="540"></canvas></div>
 <div id="touch">
   <div class="grp">
     <div class="btn" data-a="left">◀</div>
@@ -53,6 +53,7 @@
     <div class="btn def" data-a="block">🛡</div>
     <div class="btn act" data-a="attack">👊</div>
   </div>
+</div>
 </div>
 <script>
 'use strict';
@@ -171,11 +172,17 @@ function goFullscreen() {
 
 // ------------------------------------------------------------ Mise à l'échelle
 let DPR = 1;
+let ROT = false;
+const stage = document.getElementById('stage');
 function resize() {
-  const portrait = TOUCH && innerHeight > innerWidth;
-  document.body.classList.toggle('portrait', portrait);
-  const availH = portrait ? innerHeight - 230 : innerHeight;
-  const s = Math.min(innerWidth / W, availH / H);
+  ROT = TOUCH && innerHeight > innerWidth;
+  document.body.classList.toggle('rot', ROT);
+  // En mode tourné, la largeur utile est la hauteur de l'écran (et inversement)
+  const vw = ROT ? innerHeight : innerWidth, vh = ROT ? innerWidth : innerHeight;
+  if (ROT) {
+    stage.style.width = vw + 'px'; stage.style.height = vh + 'px'; stage.style.left = innerWidth + 'px';
+  } else { stage.style.width = stage.style.height = stage.style.left = ''; }
+  const s = Math.min(vw / W, vh / H);
   cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
   // Rendu net sur écrans haute densité (limité pour garder de la fluidité)
   DPR = Math.min(2, Math.max(1, (window.devicePixelRatio || 1) * s));
@@ -1180,7 +1187,8 @@ function drawBtn(b, label, color) {
 cv.addEventListener('pointerdown', e => {
   initAudio();
   const r = cv.getBoundingClientRect();
-  const x = (e.clientX - r.left) * W / r.width, y = (e.clientY - r.top) * H / r.height;
+  const x = ROT ? (e.clientY - r.top) * W / r.height : (e.clientX - r.left) * W / r.width;
+  const y = ROT ? (r.right - e.clientX) * H / r.width : (e.clientY - r.top) * H / r.height;
   goFullscreen();
   if (scene === 'title') { scene = 'select'; sel.step = 0; sfx('ui'); return; }
   if (scene === 'select') {
